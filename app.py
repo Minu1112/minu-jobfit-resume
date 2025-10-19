@@ -19,12 +19,11 @@ client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 # ==============================
 
 def call_openai_chat(system_msg, prompt):
-    """Calls OpenAI chat model with given system and user messages."""
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-3.5-turbo",
         messages=[
             {"role": "system", "content": system_msg},
-            {"role": "user", "content": prompt},
+            {"role": "user", "content": prompt}
         ],
         max_tokens=1800,
     )
