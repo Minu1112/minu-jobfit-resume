@@ -7,7 +7,7 @@ from pathlib import Path
 
 # Allow secret-managed OPENAI key on Streamlit Cloud or local .streamlit/secrets.toml
 if "OPENAI_API_KEY" in st.secrets:
-    os.environ["OPENAI_API_KEY"] = st.secrets["sk-yourkeyhere"]
+    os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
 # Parsing libraries (pdfplumber, docx2txt)
 try:
