@@ -3,6 +3,7 @@ import io
 import re
 import tempfile
 import streamlit as st
+from openai import OpenAI
 from pathlib import Path
 
 # Allow secret-managed OPENAI key on Streamlit Cloud or local .streamlit/secrets.toml
@@ -26,19 +27,20 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 
 # OpenAI
 try:
-    import openai
-except Exception:
-    openai = None
+from openai import OpenAI
 
-# --------------------- Helpers ---------------------
-def extract_text_from_pdf(file_bytes):
-    if pdfplumber is None:
-        raise RuntimeError("pdfplumber required. Install pdfplumber.")
-    text = []
-    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-        for page in pdf.pages:
-            text.append(page.extract_text() or "")
-    return "\n".join(text)
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+def call_openai_chat(system_msg, prompt):
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": prompt},
+        ],
+        max_tokens=1800,
+    )
+    return response.choices[0].message.content
 
 def extract_text_from_docx(file_bytes):
     if docx2txt is None:
