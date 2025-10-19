@@ -4,34 +4,41 @@ from openai import OpenAI
 from difflib import ndiff
 from io import BytesIO
 from fpdf import FPDF
+import docx2txt
+import PyPDF2
 
-# ==============================
-# CONFIG
-# ==============================
+# -------------------------
+# Page Config
+# -------------------------
 st.set_page_config(page_title="Minu's Jobfit Resume", page_icon="🧩", layout="wide")
 
-# Load API key from Streamlit secrets
+# -------------------------
+# Load OpenAI API Key
+# -------------------------
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
-# ==============================
-# FUNCTIONS
-# ==============================
-
+# -------------------------
+# OpenAI Chat Function
+# -------------------------
 def call_openai_chat(system_msg, prompt):
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": prompt}
-        ],
-        max_tokens=1800,
-    )
-    return response.choices[0].message.content
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",  # Use GPT-3.5-turbo for compatibility
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=1800
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"Error calling OpenAI API: {str(e)}"
 
-
+# -------------------------
+# Diff Highlighting Function
+# -------------------------
 def show_differences(original_text, modified_text):
-    """Highlights differences between original and modified text."""
     diff = ndiff(original_text.splitlines(), modified_text.splitlines())
     html = ""
     for line in diff:
@@ -43,28 +50,27 @@ def show_differences(original_text, modified_text):
             html += f"{line[2:]}<br>"
     return html
 
-
-def make_pdf(resume_text, filename="Tailored_Resume.pdf"):
-    """Converts tailored resume text to downloadable PDF."""
+# -------------------------
+# PDF Generation
+# -------------------------
+def make_pdf(text, filename="Tailored_Resume.pdf"):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=11)
-    for line in resume_text.split("\n"):
+    for line in text.split("\n"):
         pdf.multi_cell(0, 8, line)
     buffer = BytesIO()
     pdf.output(buffer)
     buffer.seek(0)
     return buffer
 
-
-# ==============================
+# -------------------------
 # UI
-# ==============================
+# -------------------------
 st.title("🧩 Minu's Jobfit Resume App")
-st.markdown("Upload your resume and job description to generate a **tailored resume and cover letter**!")
+st.markdown("Upload your resume and job description to generate a tailored resume and cover letter!")
 
 col1, col2 = st.columns(2)
-
 with col1:
     resume_file = st.file_uploader("Upload your resume (PDF or DOCX)", type=["pdf", "docx"])
 with col2:
@@ -76,10 +82,7 @@ if st.button("✨ Generate Tailored Resume"):
     if not resume_file or not jd_file:
         st.error("Please upload both files.")
     else:
-        # For simplicity, read raw text from files
-        import docx2txt
-        import PyPDF2
-
+        # Extract text from files
         def extract_text(file):
             if file.name.endswith(".pdf"):
                 reader = PyPDF2.PdfReader(file)
@@ -94,10 +97,7 @@ if st.button("✨ Generate Tailored Resume"):
         if not resume_text or not jd_text:
             st.error("Could not extract text from one or both files.")
         else:
-            system_msg = (
-                "You are a professional resume editor. "
-                "You will adjust tone, skills, and phrasing of the candidate’s resume to fit the job description."
-            )
+            system_msg = "You are a professional resume editor. Adjust the resume to fit the job description."
 
             if style_option == "Light (keywords only)":
                 prompt = f"Match keywords and minor phrasing from this job description:\n\n{jd_text}\n\nResume:\n{resume_text}"
