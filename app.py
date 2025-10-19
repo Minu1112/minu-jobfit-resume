@@ -1,37 +1,25 @@
 import os
-import io
-import re
-import tempfile
 import streamlit as st
 from openai import OpenAI
-from pathlib import Path
+from difflib import ndiff
+from io import BytesIO
+from fpdf import FPDF
 
-# Allow secret-managed OPENAI key on Streamlit Cloud or local .streamlit/secrets.toml
-if "OPENAI_API_KEY" in st.secrets:
-    os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+# ==============================
+# CONFIG
+# ==============================
+st.set_page_config(page_title="Minu's Jobfit Resume", page_icon="🧩", layout="wide")
 
-# Parsing libraries (pdfplumber, docx2txt)
-try:
-    import pdfplumber
-except Exception:
-    pdfplumber = None
-
-try:
-    import docx2txt
-except Exception:
-    docx2txt = None
-
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-
-# OpenAI
-try:
-from openai import OpenAI
-
+# Load API key from Streamlit secrets
+os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
+# ==============================
+# FUNCTIONS
+# ==============================
+
 def call_openai_chat(system_msg, prompt):
+    """Calls OpenAI chat model with given system and user messages."""
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
@@ -42,143 +30,112 @@ def call_openai_chat(system_msg, prompt):
     )
     return response.choices[0].message.content
 
-def extract_text_from_docx(file_bytes):
-    if docx2txt is None:
-        raise RuntimeError("docx2txt required. Install docx2txt.")
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
-    tmp.write(file_bytes)
-    tmp.flush()
-    tmp.close()
-    try:
-        text = docx2txt.process(tmp.name) or ""
-    finally:
-        try:
-            os.unlink(tmp.name)
-        except Exception:
-            pass
-    return text
 
-def extract_text_from_upload(uploaded_file):
-    data = uploaded_file.read()
-    name = uploaded_file.name.lower()
-    if name.endswith('.pdf'):
-        return extract_text_from_pdf(data)
-    if name.endswith('.docx') or name.endswith('.doc'):
-        return extract_text_from_docx(data)
-    return data.decode('utf-8', errors='ignore')
-
-def build_prompt_for_openai(resume_text, jd_text, level='light', cover_letter=False):
-    if cover_letter:
-        system = ("You are a professional career coach. Write a concise, persuasive cover letter that highlights why the candidate is a good fit for the job. Use the resume and job description as context.")
-        prompt = f"Job Description:\n{jd_text}\n\nResume:\n{resume_text}\n\nWrite a professional cover letter (max 300 words)."
-        return system, prompt
-
-    if level == 'light':
-        system = ("You are an expert resume writer. Adjust only lightly: match keywords from the JD and make minimal wording updates. Do not rewrite entire bullets.")
-    else:
-        system = ("You are an expert resume writer. Rewrite bullets for strong alignment to the JD while preserving facts.")
-
-    prompt = f"Job Description:\n{jd_text}\n\nOriginal Resume:\n{resume_text}\n\nReturn the tailored resume text."
-    return system, prompt
-
-def call_openai_chat(system_msg, user_msg):
-    if openai is None:
-        raise RuntimeError('openai package missing. Install openai.')
-    key = os.environ.get('OPENAI_API_KEY')
-    if not key:
-        raise RuntimeError('Please set OPENAI_API_KEY environment variable or add it to Streamlit secrets.')
-    openai.api_key = key
-    # Use ChatCompletion (this code assumes openai package compatibility)
-    response = openai.ChatCompletion.create(
-        model='gpt-4o-mini' if hasattr(openai, 'ChatCompletion') else 'gpt-4o-mini',
-        messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": user_msg}],
-        temperature=0.2,
-        max_tokens=1800,
-    )
-    return response['choices'][0]['message']['content'].strip()
-
-def highlight_differences(original, tailored):
-    import difflib
-    diff = difflib.ndiff(original.split(), tailored.split())
-    html = []
-    for token in diff:
-        if token.startswith('-'):
-            html.append(f'<span style="background-color:#ffefef;border-radius:3px;padding:1px;margin:1px;">{token[2:]}</span> ')
-        elif token.startswith('+'):
-            html.append(f'<span style="background-color:#eaffea;border-radius:3px;padding:1px;margin:1px;">{token[2:]}</span> ')
+def show_differences(original_text, modified_text):
+    """Highlights differences between original and modified text."""
+    diff = ndiff(original_text.splitlines(), modified_text.splitlines())
+    html = ""
+    for line in diff:
+        if line.startswith("+ "):
+            html += f"<span style='background-color:#d4edda;'>{line[2:]}</span><br>"
+        elif line.startswith("- "):
+            html += f"<span style='background-color:#f8d7da;text-decoration:line-through;'>{line[2:]}</span><br>"
         else:
-            html.append(token[2:] + ' ')
-    return ''.join(html)
+            html += f"{line[2:]}<br>"
+    return html
 
-def make_pretty_pdf(text, filename):
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, title=filename)
-    styles = getSampleStyleSheet()
-    body = []
-    para_style = ParagraphStyle('resume', parent=styles['Normal'], fontSize=10, leading=13, spaceAfter=6)
-    for para in text.split('\n\n'):
-        body.append(Paragraph(para.replace('\n', ' '), para_style))
-        body.append(Spacer(1, 8))
-    doc.build(body)
+
+def make_pdf(resume_text, filename="Tailored_Resume.pdf"):
+    """Converts tailored resume text to downloadable PDF."""
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=11)
+    for line in resume_text.split("\n"):
+        pdf.multi_cell(0, 8, line)
+    buffer = BytesIO()
+    pdf.output(buffer)
     buffer.seek(0)
     return buffer
 
-# --------------------- Streamlit UI ---------------------
-st.set_page_config(page_title="Minu's Jobfit Resume", layout='wide')
-st.title("Minu's Jobfit Resume ✨")
-st.caption("Upload your resume & job description, and get a tailored resume + optional cover letter.")
+
+# ==============================
+# UI
+# ==============================
+st.title("🧩 Minu's Jobfit Resume App")
+st.markdown("Upload your resume and job description to generate a **tailored resume and cover letter**!")
 
 col1, col2 = st.columns(2)
+
 with col1:
-    resume_file = st.file_uploader("Upload your resume (PDF or DOCX)", type=['pdf', 'docx', 'doc', 'txt'])
+    resume_file = st.file_uploader("Upload your resume (PDF or DOCX)", type=["pdf", "docx"])
 with col2:
-    jd_file = st.file_uploader("Upload job description (PDF, DOCX, or TXT)", type=['pdf', 'docx', 'doc', 'txt'])
+    jd_file = st.file_uploader("Upload job description (PDF or DOCX)", type=["pdf", "docx"])
 
-level = st.radio("Tailoring level", ['Light (keyword adjust)', 'Deep (rewrite bullets)'])
-include_cover = st.checkbox("Also generate a cover letter")
+style_option = st.radio("Select Tailoring Intensity:", ["Light (keywords only)", "Full rewrite"])
 
-if st.button('Generate Tailored Resume'):
+if st.button("✨ Generate Tailored Resume"):
     if not resume_file or not jd_file:
-        st.error('Please upload both resume and job description.')
+        st.error("Please upload both files.")
     else:
-        with st.spinner('Processing...'):
-            resume_text = extract_text_from_upload(resume_file)
-            jd_text = extract_text_from_upload(jd_file)
+        # For simplicity, read raw text from files
+        import docx2txt
+        import PyPDF2
 
-        lvl = 'light' if level.startswith('Light') else 'deep'
-        system_msg, prompt = build_prompt_for_openai(resume_text, jd_text, level=lvl)
-        tailored_text = call_openai_chat(system_msg, prompt)
+        def extract_text(file):
+            if file.name.endswith(".pdf"):
+                reader = PyPDF2.PdfReader(file)
+                return "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+            elif file.name.endswith(".docx"):
+                return docx2txt.process(file)
+            return ""
 
-        st.success('Tailored resume generated!')
+        resume_text = extract_text(resume_file)
+        jd_text = extract_text(jd_file)
 
-        # Side-by-side comparison
-        st.subheader('🧾 Side-by-Side Resume Comparison')
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("### Original Resume")
-            st.text_area('Original', resume_text, height=400)
-        with c2:
-            st.markdown("### Tailored Resume")
-            st.text_area('Tailored', tailored_text, height=400)
+        if not resume_text or not jd_text:
+            st.error("Could not extract text from one or both files.")
+        else:
+            system_msg = (
+                "You are a professional resume editor. "
+                "You will adjust tone, skills, and phrasing of the candidate’s resume to fit the job description."
+            )
 
-        # Diff highlighting
-        st.subheader('🔍 Highlighted Differences')
-        html_diff = highlight_differences(resume_text, tailored_text)
-        st.markdown(html_diff, unsafe_allow_html=True)
+            if style_option == "Light (keywords only)":
+                prompt = f"Match keywords and minor phrasing from this job description:\n\n{jd_text}\n\nResume:\n{resume_text}"
+            else:
+                prompt = f"Rewrite this resume to align with the following job description in a professional tone:\n\nJob Description:\n{jd_text}\n\nResume:\n{resume_text}"
 
-        # Download outputs
-        pdf_buf = make_pretty_pdf(tailored_text, 'Tailored_Resume.pdf')
-        st.download_button('📄 Download Tailored Resume (PDF)', pdf_buf, file_name='Minu_Jobfit_Tailored.pdf')
+            with st.spinner("Tailoring your resume..."):
+                tailored_text = call_openai_chat(system_msg, prompt)
 
-        # Optional cover letter
-        if include_cover:
-            st.divider()
-            st.subheader('💌 Generated Cover Letter')
-            sys_c, pr_c = build_prompt_for_openai(resume_text, jd_text, level=lvl, cover_letter=True)
-            cover_text = call_openai_chat(sys_c, pr_c)
-            st.text_area('Cover Letter', cover_text, height=300)
-            cover_pdf = make_pretty_pdf(cover_text, 'Cover_Letter.pdf')
-            st.download_button('📎 Download Cover Letter (PDF)', cover_pdf, file_name='Minu_Jobfit_CoverLetter.pdf')
+            st.subheader("📄 Tailored Resume")
+            st.markdown(tailored_text)
 
-st.markdown('---')
-st.markdown('**Notes:** This version adds a side-by-side resume comparison view, highlighted differences, optional cover letter generation, and formatted PDF downloads for a polished, professional experience.')
+            # Highlight changes
+            with st.expander("🔍 View differences (highlighted)"):
+                st.markdown(show_differences(resume_text, tailored_text), unsafe_allow_html=True)
+
+            # Download PDF
+            pdf_buffer = make_pdf(tailored_text)
+            st.download_button(
+                label="⬇️ Download Tailored Resume (PDF)",
+                data=pdf_buffer,
+                file_name="Tailored_Resume.pdf",
+                mime="application/pdf"
+            )
+
+            # Cover Letter
+            if st.button("💌 Generate Cover Letter"):
+                cover_prompt = f"Write a short, personalized cover letter for this job based on the tailored resume and job description:\n\nJob Description:\n{jd_text}\n\nResume:\n{tailored_text}"
+                with st.spinner("Generating your cover letter..."):
+                    cover_letter = call_openai_chat("You are a professional HR writer.", cover_prompt)
+                st.subheader("💌 Cover Letter")
+                st.markdown(cover_letter)
+                pdf_buffer2 = make_pdf(cover_letter, "Cover_Letter.pdf")
+                st.download_button(
+                    label="⬇️ Download Cover Letter (PDF)",
+                    data=pdf_buffer2,
+                    file_name="Cover_Letter.pdf",
+                    mime="application/pdf"
+                )
+
