@@ -1,6 +1,5 @@
 streamlit
 openai
-pdfplumber
+fpdf
+PyPDF2
 docx2txt
-python-docx
-reportlab
